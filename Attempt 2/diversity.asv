@@ -1,0 +1,75 @@
+function [p,objF,conV,FES] = diversity(p,objF,conV,minVar,maxVar,problem,FES,ExternalDB)
+
+    [popsize,n] = size(p);
+
+    % Trigger restart only if population is stagnated
+   numInfeasible = sum(conV > 0);
+   if numInfeasible<0.70*popsize|| std(conV) >= 1e-8
+       return;  % no stagnation
+   end
+        
+        %% Parameters
+        restartFraction = 0.6;           % fraction of population to "restart"
+        numToRestart = round(restartFraction * popsize);
+        numRemaining = popsize - numToRestart;
+
+        externalCount = round(0.05 * popsize);       % fraction from external DB
+        stagnatedCount = round(0.1 * popsize);       % fraction from stagnated
+        nonStagnatedCount = round(0.1 * popsize);   % fraction from non-stagnated
+        
+        % Safety scale if sum > numRemaining
+        totalSelected = externalCount + stagnatedCount + nonStagnatedCount;
+        if totalSelected > numRemaining
+            scale = numRemaining / totalSelected;
+            externalCount = floor(externalCount * scale);
+            stagnatedCount = floor(stagnatedCount * scale);
+            nonStagnatedCount = floor(nonStagnatedCount * scale);
+        end
+
+        numRandom = popsize - (externalCount + stagnatedCount + nonStagnatedCount);
+        newPopulation = zeros(popsize, n);
+
+        %% 1. Random new individuals
+        lb = minVar(:)';
+        ub = maxVar(:)';
+        newPopulation(1:numRandom,:) = rand(numRandom, n) .* (ub - lb) + lb;
+
+        %% 2. Add top individuals from ExternalDB
+feasibleIdx = find(conV_ext==0);
+if ~isempty(feasibleIdx)
+    [~, idx] = sort(objF_ext(feasibleIdx));
+    topExternal = ExternalDB(feasibleIdx(idx(1:min(externalCount,length(feasibleIdx)))), :);
+else
+    [~, idx] = sort(objF_ext);  % fallback if no feasible
+    topExternal = ExternalDB(idx(1:min(externalCount, size(ExternalDB,1))), :);
+end
+
+        %% 3. Random selection from stagnated individuals
+        stagnatedIdx = find(conV > 0);  % infeasible
+        if ~isempty(stagnatedIdx) && stagnatedCount > 0
+            weights = 1 ./ (1 + conV(stagnatedIdx));
+            randStag = randsample(stagnatedIdx, min(stagnatedCount,length(stagnatedIdx)), true, weights);
+            newPopulation(numRandom + externalCount + (1:length(randStag)), :) = p(randStag, :);
+        else
+            stagnatedCount = 0;
+        end
+
+        %% 4. Random selection from non-stagnated individuals
+        nonStagnatedIdx = find(conV == 0);  % feasible
+        if ~isempty(nonStagnatedIdx) && nonStagnatedCount > 0
+            [~, sortedFeasiIdx] = sort(objF(nonStagnatedIdx));
+            topFeasi = nonStagnatedIdx(sortedFeasiIdx(1:min(2, length(sortedFeasiIdx))));
+            remaining = setdiff(nonStagnatedIdx, topFeasi);
+            randNonStag = remaining(randperm(length(remaining), min(nonStagnatedCount-2, length(remaining))));
+            newPopulation(numRandom + externalCount + stagnatedCount + (1:length(randNonStag)), :) = p(randNonStag, :);
+        end
+
+        %% 5. Assign new population
+        p = newPopulation;
+
+        %% 6. Evaluate new population
+        [objF, conV] = fitness(p, problem);
+        FES = FES + popsize;
+
+
+end
