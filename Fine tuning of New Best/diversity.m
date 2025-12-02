@@ -1,0 +1,70 @@
+function [p, objF, conV, FES] = diversity(p, objF, conV, minVar, maxVar, problem, FES)
+    % --- Parameters ---
+    [popsize, n] = size(p);
+    stagnationThreshold = 20;   % SG
+    stagnationProp = 0.5;       % SProp
+
+    persistent Gen index Archive_X Archive_Obj Archive_Con PrevObjF
+
+    if isempty(Gen)
+        Gen = 1;
+        index = zeros(popsize,1);          % stagnation counters
+        Archive_X = [];
+        Archive_Obj = [];
+        Archive_Con = [];
+        PrevObjF = objF;                   % store previous generation fitness
+    end
+
+    % --- Compute centroid & distance ---
+    centroid = mean(p,1);
+    avgDist = mean(sqrt(sum((p - centroid).^2, 2)));
+
+    % --- Update stagnation counters ---
+    tol = 1e-12;
+    for i = 1:popsize
+        if abs(objF(i) - PrevObjF(i)) < tol
+            index(i) = index(i) + 1;
+        else
+            index(i) = 0;
+        end
+    end
+    PrevObjF = objF;  % update previous fitness
+
+    % --- Identify stagnated solutions ---
+    stagnatedMask = index > stagnationThreshold;
+
+    % --- Add infeasible or stagnated solutions to archive ---
+    tempMask = (conV > 0) | stagnatedMask;
+    if any(tempMask)
+        Archive_X = [Archive_X; p(tempMask,:)];
+        Archive_Obj = [Archive_Obj; objF(tempMask)];
+        Archive_Con = [Archive_Con; conV(tempMask)];
+        % keep archive <= popsize
+        if size(Archive_X,1) > popsize
+            Archive_X = Archive_X(end-popsize+1:end,:);
+            Archive_Obj = Archive_Obj(end-popsize+1:end);
+            Archive_Con = Archive_Con(end-popsize+1:end);
+        end
+    end
+
+    % --- Inject diversity if many stagnated ---
+    if sum(stagnatedMask) > stagnationProp*popsize && avgDist > 1e-12
+        for i = find(stagnatedMask)'
+            if ~isempty(Archive_X)
+                id = randi(size(Archive_X,1));
+                p(i,:) = Archive_X(id,:);
+                [objF(i), conV(i)] = get_Fitness(p(i,:), problem);
+                FES = FES + 1;
+                index(i) = 0;
+            else
+                % fallback: random restart
+                p(i,:) = minVar + rand(1,n).*(maxVar - minVar);
+                [objF(i), conV(i)] = get_Fitness(p(i,:), problem);
+                FES = FES + 1;
+                index(i) = 0;
+            end
+        end
+    end
+
+    Gen = Gen + 1;
+end
