@@ -5,24 +5,25 @@ format long;
 format compact;
 global initial_flag
 initial_flag = 0;
-
+global count;
+count = 0;
 global externalDatabase;
-problemSet = 2:28;   % use all 18 benchmark functions
+problemSet = 1:28;   % use all 18 benchmark functions
 
 n = 30;              % number of dimensions
 totalRuns = 0;
 feasibleRuns = 0;
 
 % Set parameters depending on dimension
-if n == 10
-    popsize = 35;
-    totalFES = 200000;
+if n == 50
+    popsize = 100;
+    totalFES = 1000000;
 elseif n == 30
     popsize = 60;
     totalFES = 600000;
 end
 
-totalTime = 25;  % number of runs per problem
+totalTime = 1;  % number of runs per problem
 
 global gen maxGen VAR
 maxGen = ceil(totalFES / (popsize * 3));
@@ -32,17 +33,21 @@ externalDatabase = zeros(maxGen * popsize, n);
 t1 = zeros(1, length(problemSet));   
 t2 = zeros(1, length(problemSet));   
 feasibleRate = zeros(1, length(problemSet));
-bestValues = zeros(totalTime, length(problemSet));  
+bestValues = zeros(totalTime, length(problemSet)); 
+solutionsArray = [];
+solutionVar = 0;
+stagnatedArray = [];
+constraintVar = 0;
 
 for problemIndex = 1:length(problemSet)
     problem = problemSet(problemIndex);
     fprintf('\n=== Problem %d ===\n', problem);
 
     feasibleCount = 0;
-    t1(problemIndex) = 0;  % initialize
+    t1(problemIndex) = 0;
     runTimerTotal = tic;
 
-    [lb, ub, ~] = get_Bounds(problem);  % Use your get_Bounds function
+    [lb, ub, ~] = get_Bounds(problem);
     minVar = lb * ones(1,n);
     maxVar = ub * ones(1,n);
 
@@ -57,7 +62,6 @@ for problemIndex = 1:length(problemSet)
         VAR0 = max(conV);
         runTimer = tic;
 
-        % --- Main optimization loop ---
         while FES <= totalFES
             cp = (-log(VAR0) - 6) / log(1 - 0.5);
             if X < 0.5, VAR = VAR0 * (1 - X)^cp; else, VAR = 0; end
@@ -67,7 +71,6 @@ for problemIndex = 1:length(problemSet)
             [objFtemp, conVtemp] = get_Fitness(temp, problem);
             FES = FES + popsize * 3;
 
-            % Record t1 at 10,000 evaluations
             if FES >= 10000 && t1(problemIndex) == 0
                 t1(problemIndex) = toc(runTimer);
             end
@@ -75,11 +78,11 @@ for problemIndex = 1:length(problemSet)
             [trial, objFtrial, conVtrial] = preSelect(temp, objFtemp, conVtemp);
             [p, objF, conV] = epsSelect(p, objF, conV, trial, objFtrial, conVtrial);
 
+
             gen = gen + 1;
             X = X + 1 / maxGen;
         end
 
-        % --- Feasibility check ---
         feasiIndex = find(conV == 0);
         if ~isempty(feasiIndex)
             feasibleCount = feasibleCount + 1;
@@ -94,14 +97,29 @@ for problemIndex = 1:length(problemSet)
         bestValues(run, problemIndex) = bestSolution;
 
         fprintf('Run %2d: Best = %.15e | Feasible = %d\n', run, bestSolution, ~isnan(bestSolution));
+        count
+        count = 0;
     end
 
-    % --- Record total runtime for this problem ---
     t2(problemIndex) = toc(runTimerTotal);
     feasibleRate(problemIndex) = feasibleCount / totalTime;
 
     fprintf('Problem %2d: Feasible Rate = %.2f%% | t1 = %.3f | t2 = %.3f\n', ...
         problem, feasibleRate(problemIndex) * 100, t1(problemIndex), t2(problemIndex));
+    % figure;
+    % plot(1:gen-1, solutionsArray(1:gen-1), 'LineWidth', 2);
+    % title('Best Fitness vs Generation');
+    % xlabel('Generation');
+    % ylabel('Best Fitness');
+    % grid on;
+    % plot(1:gen-1, stagnatedArray(1:gen-1), 'LineWidth', 2);
+    % title(sprintf('Stagnated individuals vs Generation | Problem %d', problem));
+    % xlabel('Generation');
+    % ylabel('Number of Stagnated individuals');
+    % grid on;
+    % filename = sprintf('C2oDE Problem %d.png', problem);
+    % saveas(gcf, filename);
+    % close;
 end
 
 % === Compute complexity metrics ===
