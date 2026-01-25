@@ -1,217 +1,134 @@
-
-%%
 clc;
 clear all;
 
 format long;
 format compact;
-tic;
+global initial_flag
+initial_flag = 0;
 
-% problem set of 18 benchmark functions to be tested
-problemSet=1:18;
+global externalDatabase;
+problemSet = 24:28;   % use all 18 benchmark functions
 
-% the number of dimensions which can be set as 10 or 30
-n=30;
+n = 30;              % number of dimensions
+totalRuns = 0;
+feasibleRuns = 0;
 
-% the size of evolving population
-if n==10
-    popsize=35;
-elseif n==30
-    popsize=60;
+% Set parameters depending on dimension
+if n == 50
+    popsize = 100;
+    totalFES = 10;
+elseif n == 30
+    popsize = 60;
+    totalFES = 600000;
 end
 
-% the maximum number of function evaluations
-if n==10
-    totalFES=200000;
-elseif n==30
-    totalFES=600000;
-end
-
-    
-% the value which represents the number of total runs
-totalTime=25;
-
+totalTime = 1;  % number of runs per problem
 
 global gen maxGen VAR
+maxGen = ceil(totalFES / (popsize * 3));
+externalDatabase = zeros(maxGen * popsize, n);
 
-maxGen=ceil(totalFES/(popsize*3));
+% Preallocate arrays for metrics
+t1 = zeros(1, length(problemSet));   
+t2 = zeros(1, length(problemSet));   
+feasibleRate = zeros(1, length(problemSet));
+bestValues = zeros(totalTime, length(problemSet)); 
+solutionsArray = [];
+solutionVar = 0;
+stagnatedArray = [];
+constraintVar = 0;
 
-% choose the function to be tested
-for problemIndex = 1:18
-    problem = problemSet(problemIndex)
-    
-    % the value used to record the number of runs
-    time=1;
-    
-    while time <= totalTime
-        switch problem
-            
-            case 1  % each case represents a different benchmark function
-                
-                % the lower boundary of the tested function
-                minVar=zeros(1,n);
-                
-                % the upper boundary of the tested function
-                maxVar=10*ones(1,n);
-                
-            case 2
-                
-                minVar=-5.12*ones(1,n);
-                maxVar=5.12*ones(1,n);
-                
-            case 3
-                
-                minVar=-1000*ones(1,n);
-                maxVar=1000*ones(1,n);
-                
-            case 4
-                
-                minVar=-50*ones(1,n);
-                maxVar=50*ones(1,n);
-                
-            case 5
-                
-                minVar=-600*ones(1,n);
-                maxVar=600*ones(1,n);
-                
-            case 6
-                
-                minVar=-600*ones(1,n);
-                maxVar=600*ones(1,n);
-                
-            case 7
-                
-                minVar=-140*ones(1,n);
-                maxVar=140*ones(1,n);
-                
-            case 8
-                
-                minVar=-140*ones(1,n);
-                maxVar=140*ones(1,n);
-                
-            case 9
-                
-                minVar=-500*ones(1,n);
-                maxVar=500*ones(1,n);
-                
-            case 10
-                
-                minVar=-500*ones(1,n);
-                maxVar=500*ones(1,n);
-                
-            case 11
-                
-                minVar=-100*ones(1,n);
-                maxVar=100*ones(1,n);
-                
-            case 12
-                
-                minVar=-1000*ones(1,n);
-                maxVar=1000*ones(1,n);
-            case 13
-                
-                minVar=-500*ones(1,n);
-                maxVar=500*ones(1,n);
-                
-            case 14
-                
-                minVar=-1000*ones(1,n);
-                maxVar=1000*ones(1,n);
-                
-            case 15
-                
-                minVar=-1000*ones(1,n);
-                maxVar=1000*ones(1,n);
-                
-            case 16
-                
-                minVar=-10*ones(1,n);
-                maxVar=10*ones(1,n);
-                
-            case 17
-                
-                minVar=-10*ones(1,n);
-                maxVar=10*ones(1,n);
-                
-            case 18
-                
-                minVar=-50*ones(1,n);
-                maxVar=50*ones(1,n);
-        end
-        
-        rng(problemIndex)
-        
-        % initialize the population
-        p=repmat(minVar,popsize,1)+rand(popsize,n).*repmat((maxVar-minVar),popsize,1);
-        
-        % Evaluate the population
-        [objF, conV]=fitness(p, problem);
-        FES=popsize;
-        
-        
-        gen=1;    X=0;
-        
-        VAR0=max(conV);         
-               
-        while FES<=totalFES
-            
-            cp=(-log(VAR0)-6)/log(1-0.5);
-            % adjust the threshold
-            if X < 0.5
-                VAR=VAR0*(1-X)^cp;
-            else
-                VAR=0;
+for problemIndex = 1:length(problemSet)
+    problem = problemSet(problemIndex);
+    fprintf('\n=== Problem %d ===\n', problem);
+
+    feasibleCount = 0;
+    t1(problemIndex) = 0;
+    runTimerTotal = tic;
+
+    [lb, ub, ~] = get_Bounds(problem);
+    minVar = lb * ones(1,n);
+    maxVar = ub * ones(1,n);
+
+    for run = 1:totalTime
+        rng('default'); rng(run);  % reproducible runs
+
+        % Initialize population
+        p = repmat(minVar, popsize, 1) + rand(popsize, n) .* repmat((maxVar - minVar), popsize, 1);
+        [objF, conV] = get_Fitness(p, problem);
+        FES = popsize;
+        gen = 1; X = 0;
+        VAR0 = max(conV);
+        runTimer = tic;
+
+        while FES <= totalFES
+            cp = (-log(VAR0) - 6) / log(1 - 0.5);
+            if X < 0.5, VAR = VAR0 * (1 - X)^cp; else, VAR = 0; end
+
+            [p, objF, conV, FES, numStagnated] = diversity(p, objF, conV, minVar, maxVar, problem, FES);
+            temp = DEgenerator(p, objF, conV, minVar, maxVar);
+            stagnatedArray = [stagnatedArray, numStagnated];
+            [objFtemp, conVtemp] = get_Fitness(temp, problem);
+            FES = FES + popsize * 3;
+
+            if FES >= 10000 && t1(problemIndex) == 0
+                t1(problemIndex) = toc(runTimer);
             end
 
-            % the restart strategy
-            [p,objF,conV,FES]=diversity(p,objF,conV,minVar,maxVar,problem,FES);
-         
-            % generate the next generation
-             temp=DEgenerator(p,objF,conV,minVar,maxVar);
-             [objFtemp,conVtemp]=fitness(temp,problem);
-             FES=FES+popsize*3;
-            
-             % preselection by the feasibility rule
-            [trial, objFtrial, conVtrial]=preSelect(temp,objFtemp,conVtemp);
-            
-            % slecting next generation by the epsilon constraint-handling
-            % technique
-            [p,objF,conV]=epsSelect(p,objF,conV,trial,objFtrial,conVtrial);    
-                                   
-            gen=gen+1;
-            X=X+1/maxGen;
-                        
-        end
-        
-        % modify the value of "time"
-        time=time+1;
-        
-        % calculate the best solution of each run
-        % calculate the index of feasible solutions
-        feasiIndex=find(conV==0);
-        
-        if ~isempty(feasiIndex)
-            
-            % sort the feasible solutions according to their objective
-            % function values
-            [sortedFeasiVec,~]=sort(objF(feasiIndex));
-            
-            % the best solution is the feasible solution with minimum
-            % objective function value
-            bestSolution=sortedFeasiVec(1);
-            
-        else
-            
-            % if the population is infeasible, the best solution is
-            % assigned the value of NaN
-            bestSolution=NaN;
-            
-            
+            [trial, objFtrial, conVtrial] = preSelect(temp, objFtemp, conVtemp);
+            [p, objF, conV] = epsSelect(p, objF, conV, trial, objFtrial, conVtrial);
+
+
+            gen = gen + 1;
+            X = X + 1 / maxGen;
         end
 
-        [bestSolution]
-        
+        feasiIndex = find(conV == 0);
+        if ~isempty(feasiIndex)
+            feasibleCount = feasibleCount + 1;
+            [sortedFeasiVec, ~] = sort(objF(feasiIndex));
+            bestSolution = sortedFeasiVec(1);
+        else
+            bestSolution = NaN;
+        end
+
+        totalRuns = totalRuns + 1;
+        if ~isnan(bestSolution), feasibleRuns = feasibleRuns + 1; end
+        bestValues(run, problemIndex) = bestSolution;
+
+        fprintf('Run %2d: Best = %.15e | Feasible = %d\n', run, bestSolution, ~isnan(bestSolution));
     end
 
+    t2(problemIndex) = toc(runTimerTotal);
+    feasibleRate(problemIndex) = feasibleCount / totalTime;
+
+    fprintf('Problem %2d: Feasible Rate = %.2f%% | t1 = %.3f | t2 = %.3f\n', ...
+        problem, feasibleRate(problemIndex) * 100, t1(problemIndex), t2(problemIndex));
+    % figure;
+    % plot(1:gen-1, solutionsArray(1:gen-1), 'LineWidth', 2);
+    % title('Best Fitness vs Generation');
+    % xlabel('Generation');
+    % ylabel('Best Fitness');
+    % grid on;
+    plot(1:gen-1, stagnatedArray(1:gen-1), 'LineWidth', 2);
+    title(sprintf('Stagnated individuals vs Generation | Problem %d', problem));
+    xlabel('Generation');
+    ylabel('Number of Stagnated individuals');
+    grid on;
+    filename = sprintf('C2oDE Problem %d.png', problem);
+    saveas(gcf, filename);
+    close;
 end
-run_time = toc
+
+% === Compute complexity metrics ===
+T1 = mean(t1);
+T2 = mean(t2);
+complexityRatio = (T2 - T1) / T1;
+
+fprintf('\n==== FINAL COMPLEXITY RESULTS ====\n');
+fprintf('T1 (avg time for 10k evals): %.4f sec\n', T1);
+fprintf('T2 (avg total time): %.4f sec\n', T2);
+fprintf('Algorithm Complexity Ratio (T2-T1)/T1: %.4f\n', complexityRatio);
+
+fprintf('\nOverall Feasible Rate (all problems): %.2f%%\n', (feasibleRuns / totalRuns) * 100);
+fprintf('Total experiment runtime: %.2f sec\n', toc);
